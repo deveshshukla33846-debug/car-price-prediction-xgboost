@@ -1,49 +1,78 @@
 import streamlit as st
-import xgboost as xgb
+import pandas as pd
 import numpy as np
+import xgboost as xgb
 
-# 1. Load the pre-trained XGBoost Model
+# Page configuration
+st.set_page_config(
+    page_title="Used Car Price Predictor",
+    page_icon="🚗",
+    layout="centered"
+)
+
+st.title("🚗 Used Car Price Predictor App")
+st.write("Enter the vehicle details below to estimate the accurate market resale value instantly.")
+
+# 1. Load the trained XGBoost model
 @st.cache_resource
-def load_my_model():
+def load_model():
     model = xgb.Booster()
     model.load_model("xgb_model.json")
     return model
 
-model = load_my_model()
+try:
+    model = load_model()
+except Exception as e:
+    st.error(f"Error loading model: {e}")
+    st.stop()
 
-# 2. Web Application Page Configuration & Title
-st.set_page_config(page_title="Car Price Predictor", page_icon="🚗")
-st.title("🚗 Used Car Price Predictor App")
-st.write("Enter the vehicle details below to estimate the accurate market resale value instantly.")
-
-st.divider()
-
-# 3. User Input Fields (Dropdowns and Sliders)
+# 2. User Input UI Components
 col1, col2 = st.columns(2)
 
 with col1:
-    car_age = st.number_input("Vehicle Age (in Years)", min_value=0, max_value=20, value=4)
-    fuel_type = st.selectbox("Fuel Type", ["Petrol", "Diesel", "CNG"])
+    present_price = st.number_input("Present Showroom Price of Car (in Lakhs)", min_value=0.1, max_value=100.0, value=5.0, step=0.5)
+    kms_driven = st.number_input("Distance Driven (in Kilometers)", min_value=0, max_value=500000, value=45000, step=1000)
+    fuel_type = st.selectbox("Fuel Type", options=["Petrol", "Diesel", "CNG"])
 
 with col2:
-    mileage = st.slider("Distance Driven (in Kilometers)", min_value=0, max_value=200000, value=45000, step=1000)
-    owner_type = st.selectbox("Owner Type", ["First Owner", "Second Owner", "Third Owner"])
+    seller_type = st.selectbox("Seller Type", options=["Dealer", "Individual"])
+    transmission = st.selectbox("Transmission Type", options=["Manual", "Automatic"])
+    owner = st.selectbox("Owner Type (Previous Owners)", options=[0, 1, 3]) # 0 for First, 1 for Second, 3 for Third
+    age = st.number_input("Vehicle Age (in Years)", min_value=0, max_value=30, value=4, step=1)
 
-st.divider()
-
-# 4. Predict Button and Model Inference
-if st.button("🔥 Calculate Estimated Price", use_container_width=True):
-    # Encoding categorical inputs to match the model features
-    fuel_encoded = 0 if fuel_type == "Petrol" else (1 if fuel_type == "Diesel" else 2)
-    owner_encoded = 1 if owner_type == "First Owner" else (2 if owner_type == "Second Owner" else 3)
+# 3. Preprocess Inputs to match Training Data
+if st.button("🔥 Calculate Estimated Price", type="primary"):
     
-    # Preparing data format for XGBoost
-    input_data = np.array([[car_age, mileage, fuel_encoded, owner_encoded]], dtype=float)
-    dmatrix = xgb.DMatrix(input_data)
+    # Map categorical variables to numeric values based on standard encoding
+    fuel_mapping = {"Petrol": 0, "Diesel": 1, "CNG": 2}
+    seller_mapping = {"Dealer": 0, "Individual": 1}
+    transmission_mapping = {"Manual": 0, "Automatic": 1}
     
-    # Making prediction
-    prediction = model.predict(dmatrix)[0]
+    # Create input dictionary exactly as expected by your model
+    input_data = {
+        'Present_Price': [present_price],
+        'Kms_Driven': [kms_driven],
+        'Fuel_Type': [fuel_mapping[fuel_type]],
+        'Seller_Type': [seller_mapping[seller_type]],
+        'Transmission': [transmission_mapping[transmission]],
+        'Owner': [owner],
+        'Age': [age]
+    }
     
-    # Displaying results with animation
-    st.balloons()
-    st.success(f"### 🎉 The estimated resale value of this car is: *₹ {round(prediction, 2)} Lakh*")
+    # Convert to DataFrame with exact column names and order
+    input_df = pd.DataFrame(input_data)
+    
+    # Convert to XGBoost DMatrix
+    dmatrix_input = xgb.DMatrix(input_df)
+    
+    try:
+        # Predict price
+        predicted_price = model.predict(dmatrix_input)[0]
+        
+        # Display the result (Handle negative values if model fluctuates)
+        if predicted_price < 0:
+            predicted_price = 0
+            
+        st.success(f"### 🎉 Estimated Resale Value: ₹ {predicted_price:.2f} Lakhs")
+    except Exception as prediction_error:
+        st.error(f"Prediction Error: {prediction_error}")
